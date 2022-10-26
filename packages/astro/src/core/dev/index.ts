@@ -3,17 +3,10 @@ import type { AddressInfo } from 'net';
 import { performance } from 'perf_hooks';
 import * as vite from 'vite';
 import type { AstroSettings } from '../../@types/astro';
-import {
-	runHookConfigDone,
-	runHookConfigSetup,
-	runHookServerDone,
-	runHookServerSetup,
-	runHookServerStart,
-} from '../../integrations/index.js';
-import { createVite } from '../create-vite.js';
+import { runHookServerDone } from '../../integrations/index.js';
 import { info, LogOptions, warn } from '../logger/core.js';
 import * as msg from '../messages.js';
-import { apply as applyPolyfill } from '../polyfill.js';
+import { createContainer, startContainer } from '../dev-container/index.js';
 
 export interface DevOptions {
 	logging: LogOptions;
@@ -33,42 +26,17 @@ export default async function dev(
 	options: DevOptions
 ): Promise<DevServer> {
 	const devStart = performance.now();
-	applyPolyfill();
 	await options.telemetry.record([]);
-	settings = await runHookConfigSetup({
+
+	// Create a container which sets up the Vite server.
+	const container = await createContainer({
 		settings,
-		command: 'dev',
 		logging: options.logging,
 		isRestart: options.isRestart,
 	});
-	const { host, port } = settings.config.server;
-	const { isRestart = false } = options;
 
-	// The client entrypoint for renderers. Since these are imported dynamically
-	// we need to tell Vite to preoptimize them.
-	const rendererClientEntries = settings.renderers
-		.map((r) => r.clientEntrypoint)
-		.filter(Boolean) as string[];
-
-	const viteConfig = await createVite(
-		{
-			mode: 'development',
-			server: { host },
-			optimizeDeps: {
-				include: rendererClientEntries,
-			},
-			define: {
-				'import.meta.env.BASE_URL': settings.config.base
-					? `'${settings.config.base}'`
-					: 'undefined',
-			},
-		},
-		{ settings, logging: options.logging, mode: 'dev' }
-	);
-	await runHookConfigDone({ settings, logging: options.logging });
-	const viteServer = await vite.createServer(viteConfig);
-	runHookServerSetup({ config: settings.config, server: viteServer, logging: options.logging });
-	await viteServer.listen(port);
+	// Start listening to the port
+	const devServerAddressInfo = await startContainer(container);
 
 	const site = settings.config.site
 		? new URL(settings.config.base, settings.config.site)
@@ -78,10 +46,10 @@ export default async function dev(
 		null,
 		msg.serverStart({
 			startupTime: performance.now() - devStart,
-			resolvedUrls: viteServer.resolvedUrls || { local: [], network: [] },
+			resolvedUrls: container.viteServer.resolvedUrls || { local: [], network: [] },
 			host: settings.config.server.host,
 			site,
-			isRestart,
+			isRestart: options.isRestart,
 		})
 	);
 
@@ -89,24 +57,17 @@ export default async function dev(
 	if (currentVersion.includes('-')) {
 		warn(options.logging, null, msg.prerelease({ currentVersion }));
 	}
-	if (viteConfig.server?.fs?.strict === false) {
+	if (container.viteConfig.server?.fs?.strict === false) {
 		warn(options.logging, null, msg.fsStrictWarning());
 	}
-
-	const devServerAddressInfo = viteServer.httpServer!.address() as AddressInfo;
-	await runHookServerStart({
-		config: settings.config,
-		address: devServerAddressInfo,
-		logging: options.logging,
-	});
 
 	return {
 		address: devServerAddressInfo,
 		get watcher() {
-			return viteServer.watcher;
+			return container.viteServer.watcher;
 		},
 		stop: async () => {
-			await viteServer.close();
+			await container.close();
 			await runHookServerDone({ config: settings.config, logging: options.logging });
 		},
 	};

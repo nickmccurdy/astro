@@ -1,6 +1,7 @@
 import type { BuildResult } from 'esbuild';
 import type { ErrorPayload, Logger, LogLevel, ViteDevServer } from 'vite';
 import type { SSRError } from '../@types/astro';
+import type { ModuleLoader } from './module-loader/index';
 
 import eol from 'eol';
 import fs from 'fs';
@@ -45,11 +46,11 @@ export function cleanErrorStack(stack: string) {
  * Update the error message to correct any vite-isms that we don't want to expose to the user.
  * The `server` is required if the error may come from `server.ssrLoadModule()`.
  */
-export function fixViteErrorMessage(_err: unknown, server?: ViteDevServer, filePath?: URL) {
+export function fixViteErrorMessage(_err: unknown, loader?: ModuleLoader, filePath?: URL) {
 	const err = createSafeError(_err);
 	// Vite will give you better stacktraces, using sourcemaps.
 	try {
-		server?.ssrFixStacktrace(err);
+		loader?.fixStacktrace(err);
 	} catch {}
 
 	// Fix: Astro.glob() compiles to import.meta.glob() by the time Vite sees it,

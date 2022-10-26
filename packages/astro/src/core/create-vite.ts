@@ -1,13 +1,13 @@
 import type { AstroSettings } from '../@types/astro';
 import type { LogOptions } from './logger/core';
 
-import fs from 'fs';
+import nodeFs from 'fs';
 import { createRequire } from 'module';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import * as vite from 'vite';
 import astroPostprocessVitePlugin from '../vite-plugin-astro-postprocess/index.js';
-import astroViteServerPlugin from '../vite-plugin-astro-server/index.js';
+import { vitePluginAstroServer } from '../vite-plugin-astro-server/index.js';
 import astroVitePlugin from '../vite-plugin-astro/index.js';
 import configAliasVitePlugin from '../vite-plugin-config-alias/index.js';
 import envVitePlugin from '../vite-plugin-env/index.js';
@@ -18,6 +18,7 @@ import legacyMarkdownVitePlugin from '../vite-plugin-markdown-legacy/index.js';
 import markdownVitePlugin from '../vite-plugin-markdown/index.js';
 import astroScriptsPlugin from '../vite-plugin-scripts/index.js';
 import astroScriptsPageSSRPlugin from '../vite-plugin-scripts/page-ssr.js';
+import astroLoadFallbackPlugin from '../vite-plugin-load-fallback/index.js';
 import { createCustomViteLogger } from './errors.js';
 import { resolveDependency } from './util.js';
 
@@ -25,6 +26,7 @@ interface CreateViteOptions {
 	settings: AstroSettings;
 	logging: LogOptions;
 	mode: 'dev' | 'build' | string;
+	fs?: typeof nodeFs;
 }
 
 const ALWAYS_NOEXTERNAL = new Set([
@@ -56,9 +58,9 @@ function getSsrNoExternalDeps(projectRoot: URL): string[] {
 /** Return a common starting point for all Vite actions */
 export async function createVite(
 	commandConfig: vite.InlineConfig,
-	{ settings, logging, mode }: CreateViteOptions
+	{ settings, logging, mode, fs = nodeFs }: CreateViteOptions
 ): Promise<vite.InlineConfig> {
-	const thirdPartyAstroPackages = await getAstroPackages(settings);
+	const thirdPartyAstroPackages = await getAstroPackages(settings, fs);
 	// Start with the Vite configuration that Astro core needs
 	const commonConfig: vite.InlineConfig = {
 		cacheDir: fileURLToPath(new URL('./node_modules/.vite/', settings.config.root)), // using local caches allows Astro to be used in monorepos, etc.
@@ -75,7 +77,7 @@ export async function createVite(
 			astroScriptsPlugin({ settings }),
 			// The server plugin is for dev only and having it run during the build causes
 			// the build to run very slow as the filewatcher is triggered often.
-			mode !== 'build' && astroViteServerPlugin({ settings, logging }),
+			mode !== 'build' && vitePluginAstroServer({ settings, logging, fs }),
 			envVitePlugin({ settings }),
 			settings.config.legacy.astroFlavoredMarkdown
 				? legacyMarkdownVitePlugin({ settings, logging })
@@ -85,6 +87,7 @@ export async function createVite(
 			astroPostprocessVitePlugin({ settings }),
 			astroIntegrationsContainerPlugin({ settings, logging }),
 			astroScriptsPageSSRPlugin({ settings }),
+			astroLoadFallbackPlugin({ fs })
 		],
 		publicDir: fileURLToPath(settings.config.publicDir),
 		root: fileURLToPath(settings.config.root),
@@ -176,8 +179,8 @@ function sortPlugins(pluginOptions: vite.PluginOption[]) {
 
 // Scans `projectRoot` for third-party Astro packages that could export an `.astro` file
 // `.astro` files need to be built by Vite, so these should use `noExternal`
-async function getAstroPackages(settings: AstroSettings): Promise<string[]> {
-	const { astroPackages } = new DependencyWalker(settings.config.root);
+async function getAstroPackages(settings: AstroSettings, fs: typeof nodeFs): Promise<string[]> {
+	const { astroPackages } = new DependencyWalker(settings.config.root, fs);
 	return astroPackages;
 }
 
@@ -192,10 +195,12 @@ class DependencyWalker {
 	private readonly require: NodeRequire;
 	private readonly astroDeps = new Set<string>();
 	private readonly nonAstroDeps = new Set<string>();
+	private readonly fs: typeof nodeFs;
 
-	constructor(root: URL) {
+	constructor(root: URL, fs: typeof nodeFs) {
 		const pkgUrl = new URL('./package.json', root);
 		this.require = createRequire(pkgUrl);
+		this.fs = fs;
 		const pkgPath = fileURLToPath(pkgUrl);
 		if (!fs.existsSync(pkgPath)) return;
 
@@ -221,7 +226,7 @@ class DependencyWalker {
 	private readPkgJSON(dir: string): PkgJSON | void {
 		try {
 			const filePath = path.join(dir, 'package.json');
-			return JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+			return JSON.parse(this.fs.readFileSync(filePath, 'utf-8'));
 		} catch (e) {}
 	}
 
