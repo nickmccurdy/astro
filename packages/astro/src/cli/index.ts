@@ -15,7 +15,7 @@ import {
 	resolveRoot,
 } from '../core/config/index.js';
 import { ASTRO_VERSION } from '../core/constants.js';
-import devServer from '../core/dev/index.js';
+import devServer from '../core/dev/dev.js';
 import { collectErrorMetadata } from '../core/errors.js';
 import { debug, error, info, LogOptions } from '../core/logger/core.js';
 import { enableVerboseLogging, nodeLogDestination } from '../core/logger/node.js';

@@ -1,12 +1,12 @@
 import { expect } from 'chai';
 import * as cheerio from 'cheerio';
 
-import { runInContainer } from '../../../dist/core/dev-container/index.js';
+import { runInContainer } from '../../../dist/core/dev/index.js';
 import { createFs, createRequestAndResponse } from '../test-utils.js';
 
 const root = new URL('../../fixtures/alias', import.meta.url);
 
-describe('dev-container', () => {
+describe('dev container', () => {
 	it('can render requests', async () => {
 		const fs = createFs({
 			'/src/pages/index.astro': `
